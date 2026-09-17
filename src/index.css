@@ -1,0 +1,63 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-base-950 text-slate-200 font-sans antialiased;
+  }
+  * {
+    border-color: theme('colors.base.700');
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-base-850/80 border border-base-700/60 rounded-xl backdrop-blur-sm;
+  }
+  .card-hover {
+    @apply transition-all duration-300 hover:border-primary-500/40 hover:shadow-lg hover:shadow-primary-500/5;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-primary-500 text-base-950 font-medium text-sm transition-all hover:bg-primary-400 hover:shadow-lg hover:shadow-primary-500/20 active:scale-95;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg border border-base-700 text-slate-300 font-medium text-sm transition-all hover:border-primary-500/40 hover:text-primary-300 active:scale-95;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+  .stat-grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(35, 40, 56, 0.5) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(35, 40, 56, 0.5) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: theme('colors.base.900');
+}
+::-webkit-scrollbar-thumb {
+  background: theme('colors.base.700');
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: theme('colors.base.750');
+}
+
+/* Glow text for constants */
+.constant-ref {
+  font-family: theme('fontFamily.mono');
+  @apply text-primary-400 font-medium;
+}
