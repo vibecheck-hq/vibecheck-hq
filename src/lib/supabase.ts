@@ -14,5 +14,5 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// Thermodynamic anchor — E_ABS constant per RW-IDP v1.0
-export const E_ABS = 10.0;
+// Thermodynamic anchor — Absolute Biological Energy Baseline per RW-IDP v1.0
+export const E_ABS = 9.8420;

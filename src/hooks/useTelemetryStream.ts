@@ -60,6 +60,7 @@ export function useTelemetryStream() {
     const tiltY = mean(tiltsY);
 
     const payload = {
+      user_id: user.id,
       pointer_events: samples,
       kinetic_velocity: kineticVelocity,
       surface_pressure: surfacePressure,
@@ -91,6 +92,7 @@ export function useTelemetryStream() {
           : 0;
 
       await supabase.from('phenotype_profiles').insert({
+        user_id: user.id,
         session_id: data.id,
         velocity_mean: velocityMean,
         velocity_stddev: velocityStddev,
@@ -143,7 +145,7 @@ export function useTelemetryStream() {
   const transmit = useCallback(async (data: Record<string, unknown>) => {
     if (!user) return;
     try {
-      await supabase.from('telemetry_sessions').insert(data);
+      await supabase.from('telemetry_sessions').insert({ ...data, user_id: user.id });
     } catch {
       // Silent
     }
