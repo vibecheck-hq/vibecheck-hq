@@ -50,3 +50,30 @@ export interface AuthUser {
   id: string;
   email: string;
 }
+
+export interface TelemetrySession {
+  id: string;
+  user_id: string;
+  started_at: string;
+  ended_at: string | null;
+  pointer_events: Record<string, unknown>[];
+  kinetic_velocity: number;
+  surface_pressure: number;
+  tilt_x: number;
+  tilt_y: number;
+  event_count: number;
+  created_at: string;
+}
+
+export interface PhenotypeProfile {
+  id: string;
+  user_id: string;
+  session_id: string | null;
+  velocity_mean: number;
+  velocity_stddev: number;
+  pressure_mean: number;
+  tilt_x_mean: number;
+  tilt_y_mean: number;
+  profile_hash: string;
+  computed_at: string;
+}

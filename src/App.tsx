@@ -10,10 +10,12 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { AuthModal } from '@/components/AuthModal';
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useTelemetryStream } from '@/hooks/useTelemetryStream';
 
 function App() {
   const { user, loading } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('landing');
+  useTelemetryStream();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
 
