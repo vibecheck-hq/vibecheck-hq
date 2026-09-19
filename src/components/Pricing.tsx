@@ -41,17 +41,6 @@ export function Pricing({ onNavigate }: PricingProps) {
       return;
     }
 
-    if (!user) {
-      setAuthMode('signup');
-      setAuthOpen(true);
-      return;
-    }
-
-    if (!plan.stripe_price_id) {
-      setError('This plan is not available yet. Please check back later.');
-      return;
-    }
-
     setLoadingPlan(plan.id);
     try {
       await createCheckoutSession(plan.stripe_price_id);
