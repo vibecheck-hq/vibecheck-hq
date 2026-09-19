@@ -1,5 +1,21 @@
 import { supabase } from './supabase';
 
+export async function createCheckoutSession(priceId: string) {
+  const { data, error } = await supabase.functions.invoke('create-checkout', {
+    body: { priceId },
+  });
+
+  if (error) {
+    throw new Error('Failed to initialize secure checkout.');
+  }
+
+  if (data?.url) {
+    window.location.href = data.url;
+  } else {
+    throw new Error('No checkout URL returned from gateway.');
+  }
+}
+
 export async function triggerSubtextCheckout(targetDob: string) {
   try {
     // Invoke the deployed Deno Edge Function
