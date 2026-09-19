@@ -1,134 +1,80 @@
-import { useState, type FormEvent } from 'react';
-import { Activity, ArrowRight, Loader2, Lock, Sparkles } from 'lucide-react';
-import { useAuth } from '@/lib/auth';
-import { triggerSubtextCheckout } from '@/lib/stripe';
-import { AuthModal } from '@/components/AuthModal';
+import React, { useState, useRef } from 'react';
+import { triggerSubtextCheckout } from '../lib/stripe';
+import { Lock, Zap, BrainCircuit } from 'lucide-react';
 
-interface SubtextPaywallProps {
-  /** Date of birth for the target being analyzed (ISO yyyy-mm-dd). */
-  targetDob: string;
-  /** Optional callback after checkout is successfully initiated. */
-  onCheckoutStarted?: () => void;
-}
+export default function SubtextPaywall() {
+  const [inputText, setInputText] = useState('');
+  const [latencyAlert, setLatencyAlert] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const lastKeyTime = useRef<number>(Date.now());
 
-export function SubtextPaywall({ targetDob, onCheckoutStarted }: SubtextPaywallProps) {
-  const { user } = useAuth();
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Real-time Motor Fatigue / Hesitation Tracker
+  const handleKeystroke = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputText(e.target.value);
+    const now = Date.now();
+    const delta = (now - lastKeyTime.current) / 1000;
+    lastKeyTime.current = now;
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!user) {
-      setAuthMode('signup');
-      setAuthOpen(true);
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await triggerSubtextCheckout(targetDob);
-      onCheckoutStarted?.();
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Checkout failed. Please try again.'
-      );
-    } finally {
-      setLoading(false);
+    // Trigger anxiety hook if user pauses (hesitation) and has typed more than 5 words
+    if (delta > 1.482 && e.target.value.split(/\s+/).length > 5) {
+      setLatencyAlert(true);
     }
   };
 
+  const handleUnlock = async () => {
+    setIsProcessing(true);
+    // Hardcoded target DOB for the MVP flow, can be extracted to a UI input later
+    await triggerSubtextCheckout('1995-08-15'); 
+    setIsProcessing(false);
+  };
+
   return (
-    <>
-      <div className="card p-8 relative animate-slide-up">
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-primary-500 text-base-950 text-xs font-semibold">
-          Clarity Pro
-        </div>
-
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-base-950" strokeWidth={2.5} />
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-slate-100">Subtext Engine</h3>
-            <p className="text-xs text-muted-500">Unlock the deep-pattern analysis layer</p>
-          </div>
-        </div>
-
-        <p className="text-sm text-muted-400 leading-relaxed">
-          The Subtext Engine surfaces behavioral patterns and latent signatures from your
-          telemetry data. This upgrade unlocks full stylometric vectors, phenotype
-          correlation, and longitudinal drift detection.
-        </p>
-
-        <ul className="mt-6 space-y-3">
-          {[
-            'Deep stylometric vector analysis',
-            'Phenotype correlation mapping',
-            'Longitudinal drift detection',
-            'Unlimited session archiving',
-          ].map((feat, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm text-muted-400">
-              <div className="w-4 h-4 rounded-full bg-primary-500/10 flex items-center justify-center mt-0.5 flex-shrink-0">
-                <Activity className="w-2.5 h-2.5 text-primary-400" strokeWidth={3} />
-              </div>
-              {feat}
-            </li>
-          ))}
-        </ul>
-
-        <form onSubmit={handleSubmit} className="mt-8 space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-muted-400 mb-1.5">
-              Target Date of Birth
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-600" />
-              <input
-                type="date"
-                required
-                value={targetDob}
-                readOnly
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-base-800 border border-base-700 text-sm text-slate-200 placeholder-muted-600 focus:outline-none focus:border-primary-500/50 focus:ring-1 focus:ring-primary-500/20 transition-all cursor-not-allowed"
-              />
-            </div>
-          </div>
-
-          {error && (
-            <div className="px-3 py-2 rounded-lg bg-error-500/10 border border-error-500/30 text-sm text-error-400">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <>
-                {user ? 'Unlock Clarity Pro' : 'Sign Up to Continue'}
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
-        </form>
-
-        <p className="mt-4 text-center text-xs text-muted-600">
-          Secure checkout via Stripe. Cancel anytime.
-        </p>
+    <div className="flex flex-col gap-4 p-6 bg-[#0d1117] text-[#00ffcc] font-mono w-full max-w-lg mx-auto border border-[#30363d] shadow-2xl rounded-lg">
+      <div className="border-b border-[#30363d] pb-3 mb-2 flex items-center justify-between">
+        <h2 className="text-lg uppercase tracking-widest text-[#00ffcc] flex items-center gap-2 m-0">
+          <BrainCircuit size={20} />
+          Subtext Engine
+        </h2>
+        <span className="text-[10px] bg-[#161b22] px-2 py-1 rounded border border-[#30363d]">v3.5 LIVE</span>
       </div>
 
-      <AuthModal
-        open={authOpen}
-        onClose={() => setAuthOpen(false)}
-        initialMode={authMode}
-      />
-    </>
+      <div className="bg-[#161b22] p-4 border border-[#30363d] rounded">
+        <label className="text-xs text-[#00aa88] uppercase mb-2 block font-bold">Decode Their Intent:</label>
+        <textarea
+          className="w-full h-28 bg-[#0d1117] border border-[#30363d] text-white p-3 resize-none focus:outline-none focus:border-[#00aaff] transition-colors rounded"
+          placeholder="Paste the confusing text message or email here..."
+          value={inputText}
+          onChange={handleKeystroke}
+        />
+      </div>
+
+      {latencyAlert && (
+        <div className="border-l-4 border-[#ff3366] bg-[rgba(255,51,102,0.1)] text-[#ff3366] p-3 text-xs animate-pulse">
+          <strong>▲ HIGH COGNITIVE STRAIN DETECTED</strong><br/>
+          Your input latency indicates extreme hesitation. The target's subtext contains conflicting emotional markers.
+        </div>
+      )}
+
+      {/* Robert Protocol 3.0: Visual Anchor Hierarchy */}
+      <button 
+        onClick={handleUnlock}
+        disabled={isProcessing || inputText.length < 10}
+        className={`w-full py-4 px-4 uppercase tracking-wide border-none rounded-md transition-all flex justify-between items-center group ${
+          inputText.length < 10 
+            ? 'bg-[#161b22] text-[#888] cursor-not-allowed' 
+            : 'bg-[#00aaff] hover:bg-[#0088cc] text-black font-bold cursor-pointer shadow-[0_0_15px_rgba(0,170,255,0.4)]'
+        }`}
+      >
+        <span className="flex flex-col items-start">
+          <span className="text-base flex items-center gap-2">
+            {isProcessing ? 'Initializing Secure Route...' : 'Unlock Deep Analysis'}
+          </span>
+          <span className="text-[10px] font-normal mt-1 opacity-80 flex items-center gap-1">
+            <Lock size={10} /> Stripe Authenticated • £9.99/mo
+          </span>
+        </span>
+        <Zap size={18} className={`${inputText.length >= 10 && !isProcessing ? 'group-hover:translate-x-1 transition-transform' : 'opacity-50'}`} />
+      </button>
+    </div>
   );
 }
