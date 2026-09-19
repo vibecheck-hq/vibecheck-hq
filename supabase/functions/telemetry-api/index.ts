@@ -1,133 +1,84 @@
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Missing authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const { text, targetDob } = await req.json();
+
+    if (!text) {
+      throw new Error("Target text is missing from payload.");
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+    if (!GEMINI_API_KEY) throw new Error("Gemini API Key not configured.");
 
-    const client = createClient(supabaseUrl, supabaseKey, {
-      global: { headers: { Authorization: authHeader } },
+    // The Weaponized Brain Trust Prompt (Targeting 18-29 Demographic Anxiety)
+    const systemPrompt = `
+      Act as an elite behavioral profiler and linguist. You are analyzing communication for a high-stakes client.
+      You must decode the provided text message and output a clinical, psychological dossier. 
+      The target's Date of Birth is ${targetDob}.
+      
+      Do not be polite. Be brutally analytical. Focus on power dynamics, passive-aggression, evasion, and hidden leverage.
+      
+      You MUST return the output EXACTLY as a raw JSON object with the following keys:
+      {
+        "archetype": "A 2-3 word clinical title for the target (e.g., 'The Evasive Narcissist', 'The Anxious Avoider')",
+        "unfiltered_translation": "What the target's text ACTUALLY means, stripped of all politeness.",
+        "power_dynamic": "Who currently holds the power in this interaction, and why.",
+        "depressed_intelligences": [
+          "Name 3 psychological vulnerabilities or 'Depressed Intelligences' the target exhibits based on their syntax (e.g., 'Unfiltered Emotional Contagion', 'Implicit Ambiguity Intolerance')."
+        ],
+        "strategic_rebuttal": "The exact, word-for-word text message our client should send back to seize total control of the dynamic."
+      }
+      
+      Return ONLY valid JSON. No markdown formatting, no backticks, no explanations.
+    `;
+
+    // Fetch call to Google Gemini 3 Pro
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: systemPrompt },
+              { text: `TARGET TEXT TO DECODE: "${text}"` }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.2, // Low temperature for cold, clinical certainty
+        }
+      })
     });
 
-    const {
-      data: { user },
-      error: userError,
-    } = await client.auth.getUser();
+    const geminiData = await response.json();
+    const rawContent = geminiData.candidates[0].content.parts[0].text;
+    
+    // Parse the strict JSON returned by Gemini
+    const dossier = JSON.parse(rawContent.trim());
 
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid or expired token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    return new Response(JSON.stringify(dossier), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 200,
+    });
 
-    const url = new URL(req.url);
-    const path = url.pathname.replace("/functions/v1/telemetry-api", "");
-
-    // GET /stats — aggregate dashboard stats
-    if (req.method === "GET" && path === "/stats") {
-      const adminClient = createClient(supabaseUrl, serviceRoleKey!);
-
-      const [eventsRes, vectorsRes, metricsRes] = await Promise.all([
-        adminClient.from("telemetry_events").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(100),
-        adminClient.from("stylometry_vectors").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
-        adminClient.from("system_metrics").select("*").eq("user_id", user.id).order("recorded_at", { ascending: false }).limit(50),
-      ]);
-
-      const events = eventsRes.data ?? [];
-      const errorCount = events.filter((e: { severity: string }) => e.severity === "error" || e.severity === "critical").length;
-      const warningCount = events.filter((e: { severity: string }) => e.severity === "warning").length;
-
-      return new Response(
-        JSON.stringify({
-          total_events: events.length,
-          error_count: errorCount,
-          warning_count: warningCount,
-          vectors: vectorsRes.data?.length ?? 0,
-          nodes: metricsRes.data?.length ?? 0,
-          e_abs: 10.0,
-          protocol: "RW-IDP v1.0",
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // POST /events — ingest a telemetry event
-    if (req.method === "POST" && path === "/events") {
-      const body = await req.json();
-      const { source, event_type, severity, message, payload } = body;
-
-      if (!source || !event_type || !message) {
-        return new Response(
-          JSON.stringify({ error: "Missing required fields: source, event_type, message" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const validSeverities = ["info", "warning", "error", "critical"];
-      const finalSeverity = validSeverities.includes(severity) ? severity : "info";
-
-      const { data, error } = await client.from("telemetry_events").insert({
-        source,
-        event_type,
-        severity: finalSeverity,
-        message,
-        payload: payload ?? {},
-      }).select().single();
-
-      if (error) {
-        return new Response(
-          JSON.stringify({ error: error.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ event: data }),
-        { status: 201, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // GET /health — system health check
-    if (req.method === "GET" && path === "/health") {
-      return new Response(
-        JSON.stringify({
-          status: "operational",
-          e_abs: 10.0,
-          protocol: "RW-IDP v1.0",
-          timestamp: new Date().toISOString(),
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(
-      JSON.stringify({ error: "Not found" }),
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error("Gemini 3 Pro Execution Error:", err);
+    return new Response(JSON.stringify({ error: err.message }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      status: 400,
+    });
   }
 });
