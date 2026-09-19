@@ -2,7 +2,8 @@ import React from 'react';
 import SubtextPaywall from '../components/SubtextPaywall';
 import { Eye, MessageSquareOff } from 'lucide-react';
 
-export default function LandingPage() {
+// Modified: Removed the word 'default' to satisfy App.tsx's named import
+export function LandingPage() {
   return (
     <div className="min-h-screen bg-[#000000] text-white flex flex-col items-center justify-center p-4">
       
