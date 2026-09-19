@@ -1,6 +1,5 @@
-import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import Stripe from "npm:stripe@13.10.0";
-// verify_jwt = false; auth is enforced inside via getUser()
+// verify_jwt = false; public checkout initiation, no Supabase login required
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -28,33 +27,6 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Missing authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-
-    const client = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const {
-      data: { user },
-      error: userError,
-    } = await client.auth.getUser();
-
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid or expired token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
     if (!stripeKey) {
       return new Response(
@@ -67,6 +39,13 @@ Deno.serve(async (req: Request) => {
       apiVersion: "2023-10-16",
     });
 
+    let body: { email?: string } = {};
+    try {
+      body = await req.json();
+    } catch {
+      // empty/invalid body is fine; email is optional
+    }
+
     const origin = req.headers.get("origin") ?? "https://cognimetrics.io";
 
     const session = await stripe.checkout.sessions.create({
@@ -74,10 +53,8 @@ Deno.serve(async (req: Request) => {
       line_items: [{ price_data: PRICE_DATA, quantity: 1 }],
       success_url: `${origin}/?checkout=success`,
       cancel_url: `${origin}/?checkout=cancelled`,
-      customer_email: user.email ?? undefined,
-      client_reference_id: user.id,
+      customer_email: body.email ?? undefined,
       metadata: {
-        user_id: user.id,
         protocol: "RW-IDP v1.0",
       },
     });
