@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 import Stripe from "npm:stripe@13.10.0";
+// verify_jwt = false; auth is enforced inside via getUser()
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

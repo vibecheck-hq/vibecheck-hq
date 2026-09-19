@@ -1,5 +1,5 @@
 [functions.telemetry-api]
-verify_jwt = true
+verify_jwt = false
 entrypoint = "./functions/telemetry-api/index.ts"
 
 [functions.telemetry-ingest]
@@ -7,7 +7,7 @@ verify_jwt = true
 entrypoint = "./functions/telemetry-ingest/index.ts"
 
 [functions.create-checkout]
-verify_jwt = true
+verify_jwt = false
 entrypoint = "./functions/create-checkout/index.ts"
 
 [functions.stripe-webhook]
