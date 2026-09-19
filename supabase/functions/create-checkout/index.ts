@@ -1,73 +1,56 @@
-import Stripe from "npm:stripe@13.10.0";
-// verify_jwt = false; public checkout initiation, no Supabase login required
-
+import Stripe from "npm:stripe";
+// Initialize Stripe using Deno's native fetch for edge compatibility
+const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") as string, {
+  httpClient: Stripe.createFetchHttpClient(),
+});
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-ping",
 };
-
-const PRICE_DATA = {
-  currency: "gbp" as const,
-  unit_amount: 999,
-  recurring: { interval: "month" as const },
-  product_data: { name: "Cognimetrics Pro — Monthly" },
-};
-
-Deno.serve(async (req: Request) => {
+Deno.serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response("ok", { headers: corsHeaders });
   }
-
-  if (req.method !== "POST") {
-    return new Response(
-      JSON.stringify({ error: "Method not allowed" }),
-      { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+  // Handle Keep-Alive Ping to mitigate cold starts
+  if (req.headers.get("x-ping") === "keep-alive") {
+    return new Response("pong", { headers: corsHeaders, status: 200 });
   }
-
   try {
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) {
-      return new Response(
-        JSON.stringify({ error: "Stripe is not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const stripe = new Stripe(stripeKey, {
-      apiVersion: "2023-10-16",
-    });
-
-    let body: { email?: string } = {};
-    try {
-      body = await req.json();
-    } catch {
-      // empty/invalid body is fine; email is optional
-    }
-
-    const origin = req.headers.get("origin") ?? "https://cognimetrics.io";
-
+    const body = await req.json();
+    const { anonymousId, origin } = body;
+    // Create Stripe Checkout Session (Lean Payload, Zero DB Pre-Writes)
     const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
       mode: "subscription",
-      line_items: [{ price_data: PRICE_DATA, quantity: 1 }],
-      success_url: `${origin}/?checkout=success`,
-      cancel_url: `${origin}/?checkout=cancelled`,
-      customer_email: body.email ?? undefined,
+      line_items: [
+        {
+          price: Deno.env.get("STRIPE_PRICE_ID")!,
+          quantity: 1,
+        },
+      ],
+      // Use origin from client to ensure correct redirect back to the Bolt/Netlify preview
+      success_url: `${origin || req.headers.get("origin")}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin || req.headers.get("origin")}/pricing`,
       metadata: {
-        protocol: "RW-IDP v1.0",
+        anonymousId: anonymousId || "unknown_impulse_user",
       },
     });
-
     return new Response(
-      JSON.stringify({ url: session.url }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ sessionId: session.id, url: session.url }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      }
     );
-  } catch (err) {
+  } catch (error) {
+    console.error("Stripe Checkout Error:", error);
     return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ error: error.message }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      }
     );
   }
 });
-
