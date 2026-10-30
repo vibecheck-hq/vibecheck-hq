@@ -3,23 +3,32 @@ import { createClient } from '@supabase/supabase-js';
 import { Loader2, ArrowRight, RefreshCcw, Fingerprint } from 'lucide-react';
 
 const supabaseUrl = 'https://qnnnnvlissdqdwmkgrao.supabase.co';
-const supabaseAnonKey = 'EyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFubm5udmxpc3NkcWR3bWtncmFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc0MjY5MjcsImV4cCI6MjEwMzAwMjkyN30.LesQ_v4RJD5Gc4zOxociV8wl-fbSXnIerahwenYGv4k';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFubm5udmxpc3NkcWR3bWtncmFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc0MjY5MjcsImV4cCI6MjEwMzAwMjkyN30.LesQ_v4RJD5Gc4zOxociV8wl-fbSXnIerahwenYGv4k';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function App() {
   const [sessionUuid, setSessionUuid] = useState<string | null>(null);
-  
+  const [stripeSessionId, setStripeSessionId] = useState<string | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const session = params.get('session');
+    const cs = params.get('cs');
     if (session) {
       setSessionUuid(session);
+    }
+    if (cs) {
+      setStripeSessionId(cs);
     }
   }, []);
 
   return (
     <div className="min-h-screen bg-[#08090C] text-gray-100 font-sans selection:bg-[#22C55E] selection:text-black">
-      {sessionUuid ? <RevealPage sessionUuid={sessionUuid} /> : <LandingPage />}
+      {sessionUuid ? (
+        <RevealPage sessionUuid={sessionUuid} stripeSessionId={stripeSessionId} />
+      ) : (
+        <LandingPage />
+      )}
     </div>
   );
 }
@@ -31,40 +40,43 @@ function LandingPage() {
 
   const handleCheckout = async () => {
     if (!inputText.trim()) {
-      setError("Please paste a message first.");
+      setError('Please paste a message first.');
       return;
     }
-    
+
     setIsLoading(true);
     setError('');
 
     try {
-      const response = await fetch('https://qnnnnvlissdqdwmkgrao.supabase.co/functions/v1/create-checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          raw_text: inputText, 
-          return_origin: window.location.origin 
-        })
-      });
+      const response = await fetch(
+        'https://qnnnnvlissdqdwmkgrao.supabase.co/functions/v1/create-checkout',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            raw_text: inputText.trim(),
+            return_origin: window.location.origin,
+          }),
+        }
+      );
 
       const data = await response.json();
-      
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
+
+      const targetUrl = data.checkout_url || data.url;
+      if (targetUrl) {
+        window.location.href = targetUrl;
       } else {
-        throw new Error("No checkout URL returned.");
+        throw new Error(data.error || 'No checkout URL returned.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError("Connection unstable. Please try again.");
+      setError(err?.message || 'Connection unstable. Please try again.');
       setIsLoading(false);
     }
   };
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-6 max-w-[390px] mx-auto relative overflow-hidden">
-      {/* Background ambient glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] h-[300px] bg-[#22C55E]/10 rounded-full blur-[100px] pointer-events-none" />
       <div className="w-full space-y-8 relative z-10">
         <div className="space-y-3">
@@ -72,8 +84,13 @@ function LandingPage() {
             <Fingerprint className="w-3 h-3 text-[#22C55E]" />
             <span>Anonymous & Encrypted</span>
           </div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-white leading-tight">Stop overthinking <br/>their texts.</h1>
-          <p className="text-gray-400 text-lg">Paste their ambiguous message. We'll tell you exactly what they mean.</p>
+          <h1 className="text-4xl font-extrabold tracking-tight text-white leading-tight">
+            Stop overthinking <br />
+            their texts.
+          </h1>
+          <p className="text-gray-400 text-lg">
+            Paste their ambiguous message. We'll tell you exactly what they mean.
+          </p>
         </div>
 
         <textarea
@@ -107,35 +124,76 @@ function LandingPage() {
   );
 }
 
-function RevealPage({ sessionUuid }: { sessionUuid: string }) {
+function RevealPage({
+  sessionUuid,
+  stripeSessionId,
+}: {
+  sessionUuid: string;
+  stripeSessionId: string | null;
+}) {
   const [result, setResult] = useState<any>(null);
   const [isPolling, setIsPolling] = useState(true);
 
   useEffect(() => {
     let pollInterval: any;
+    let isMounted = true;
 
     const fetchResult = async () => {
-      const { data, error } = await supabase
-        .from('decode_jobs')
-        .select('*')
-        .eq('id', sessionUuid)
-        .single();
+      try {
+        const { data } = await supabase
+          .from('decode_jobs')
+          .select('*')
+          .eq('id', sessionUuid)
+          .maybeSingle();
 
-      if (data && data.status === 'unlocked' && data.decode_result) {
-        setResult(data.decode_result);
-        setIsPolling(false);
-        clearInterval(pollInterval);
+        if (data && data.status === 'unlocked' && data.decode_result) {
+          if (isMounted) {
+            setResult(data.decode_result);
+            setIsPolling(false);
+            clearInterval(pollInterval);
+          }
+          return;
+        }
+
+        const verifyRes = await fetch(
+          'https://qnnnnvlissdqdwmkgrao.supabase.co/functions/v1/create-checkout',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'verify',
+              session_uuid: sessionUuid,
+              stripe_session_id: stripeSessionId,
+            }),
+          }
+        );
+
+        if (verifyRes.ok) {
+          const verifyData = await verifyRes.json();
+          if (verifyData?.status === 'unlocked' && verifyData?.decode_result) {
+            if (isMounted) {
+              setResult(verifyData.decode_result);
+              setIsPolling(false);
+              clearInterval(pollInterval);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Verification poll error:', err);
       }
     };
 
     fetchResult();
-    
+
     if (isPolling) {
-      pollInterval = setInterval(fetchResult, 2000);
+      pollInterval = setInterval(fetchResult, 2500);
     }
 
-    return () => clearInterval(pollInterval);
-  }, [sessionUuid, isPolling]);
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [sessionUuid, stripeSessionId, isPolling]);
 
   const handleReset = () => {
     window.location.href = window.location.origin;
@@ -148,7 +206,9 @@ function RevealPage({ sessionUuid }: { sessionUuid: string }) {
           <div className="absolute inset-0 bg-[#22C55E] blur-[30px] opacity-20 rounded-full" />
           <Loader2 className="w-12 h-12 text-[#22C55E] animate-spin mb-6 relative z-10" />
         </div>
-        <p className="text-sm font-mono text-[#22C55E] tracking-widest uppercase animate-pulse">Decrypting Matrix</p>
+        <p className="text-sm font-mono text-[#22C55E] tracking-widest uppercase animate-pulse">
+          Decrypting Matrix
+        </p>
       </main>
     );
   }
@@ -164,27 +224,43 @@ function RevealPage({ sessionUuid }: { sessionUuid: string }) {
 
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 space-y-6 shadow-2xl transition-all duration-500 hover:border-white/20">
         <div>
-          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">True Intent</h3>
+          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            True Intent
+          </h3>
           <p className="text-gray-100 text-lg leading-relaxed">{result.true_intent}</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-red-500/5 border border-red-500/20 p-4 rounded-2xl">
-            <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider mb-3">Red Flags</h3>
+            <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider mb-3">
+              Red Flags
+            </h3>
             <ul className="text-sm text-red-200/80 space-y-2">
-              {result.red_flags?.map((flag: string, i: number) => <li key={i} className="leading-snug">• {flag}</li>)}
+              {result.red_flags?.map((flag: string, i: number) => (
+                <li key={i} className="leading-snug">
+                  • {flag}
+                </li>
+              ))}
             </ul>
           </div>
           <div className="bg-[#22C55E]/5 border border-[#22C55E]/20 p-4 rounded-2xl">
-            <h3 className="text-xs font-bold text-[#22C55E] uppercase tracking-wider mb-3">Green Flags</h3>
+            <h3 className="text-xs font-bold text-[#22C55E] uppercase tracking-wider mb-3">
+              Green Flags
+            </h3>
             <ul className="text-sm text-[#22C55E]/80 space-y-2">
-              {result.green_flags?.map((flag: string, i: number) => <li key={i} className="leading-snug">• {flag}</li>)}
+              {result.green_flags?.map((flag: string, i: number) => (
+                <li key={i} className="leading-snug">
+                  • {flag}
+                </li>
+              ))}
             </ul>
           </div>
         </div>
 
         <div className="pt-5 border-t border-white/10">
-          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Executive Takeaway</h3>
+          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            Executive Takeaway
+          </h3>
           <p className="text-[#22C55E] font-semibold text-lg">{result.executive_takeaway}</p>
         </div>
       </div>
