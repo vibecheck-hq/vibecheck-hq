@@ -38,7 +38,7 @@ function LandingPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleCheckout = async () => {
+    const handleCheckout = async () => {
     if (!inputText.trim()) {
       setError('Please paste a message first.');
       return;
@@ -62,18 +62,20 @@ function LandingPage() {
 
       const data = await response.json();
 
-      const targetUrl = data.checkout_url || data.url;
-      if (targetUrl) {
-        window.location.href = targetUrl;
+      if (data.url || data.checkout_url) {
+        window.location.href = data.url || data.checkout_url;
       } else {
-        throw new Error(data.error || 'No checkout URL returned.');
+        throw new Error(data.error || 'Failed to generate checkout link');
       }
+
     } catch (err: any) {
-      console.error(err);
-      setError(err?.message || 'Connection unstable. Please try again.');
+      console.error("Checkout error:", err);
+      setError(err.message || 'Payment gateway routing failed.');
+    } finally {
       setIsLoading(false);
     }
   };
+
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-6 max-w-[390px] mx-auto relative overflow-hidden">
