@@ -1,538 +1,348 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Loader2,
-  ArrowRight,
-  RefreshCcw,
-  Fingerprint,
-  Sparkles,
-  ShieldAlert,
-  CheckCircle2,
-  Copy,
-  Check,
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 
-const CHECKOUT_ENDPOINT = 'https://qnnnnvlissdqdwmkgrao.supabase.co/functions/v1/create-checkout';
+export const SUPABASE_PROJECT_ID = 'qnnnnvlissdqdwmkgrao';
+export const SUPABASE_REGION = 'eu-west-1';
+export const STRIPE_PUBLISHABLE_KEY =
+  'pk_live_51UImSpHQBZVjUZXN4lQPfteGH54MSxKWh1XUmyICs7Ul3z0DpR1J3HoN9LFgmGoq6DTCNXphll9Nm7PGiQSuDT44002cIQqBtU';
+
+const CHECKOUT_ENDPOINT = `https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/create-checkout`;
 const STORAGE_CS_KEY = 'vibecheck_stripe_cs';
 const STORAGE_CREDITS_KEY = 'vibecheck_credits_left';
-const STORAGE_DRAFT_KEY = 'vibecheck_draft_text';
+const DRAFT_TEXT_KEY = 'vibecheck_draft_text';
 
-export interface DecodeResult {
+interface DecodeResult {
   headline: string;
   true_intent: string;
-  red_flags?: string[];
-  green_flags?: string[];
+  red_flags: string[];
+  green_flags: string[];
   executive_takeaway: string;
 }
 
-interface EdgeFunctionResponse {
-  url?: string;
-  checkout_url?: string;
-  instant_unlock?: boolean;
-  status?: 'pending' | 'unlocked';
-  decode_result?: DecodeResult;
-  session_id?: string;
-  stripe_session_id?: string;
-  credits_remaining?: number;
-  error?: string;
-}
-
 export default function App() {
-  const [sessionUuid, setSessionUuid] = useState<string | null>(null);
-  const [stripeSessionId, setStripeSessionId] = useState<string | null>(null);
-  const [preloadedResult, setPreloadedResult] = useState<DecodeResult | null>(null);
+  const [rawText, setRawText] = useState<string>(() => {
+    return sessionStorage.getItem(DRAFT_TEXT_KEY) || '';
+  });
+  const [loading, setLoading] = useState<boolean>(false);
+  const [verifying, setVerifying] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [decodeResult, setDecodeResult] = useState<DecodeResult | null>(null);
+  const [copied, setCopied] = useState<boolean>(false);
 
+  const [creditsLeft, setCreditsLeft] = useState<number>(() => {
+    const saved = localStorage.getItem(STORAGE_CREDITS_KEY);
+    const parsed = saved ? parseInt(saved, 10) : 0;
+    return Number.isNaN(parsed) ? 0 : Math.max(0, parsed);
+  });
+
+  const wordCount = rawText.trim() ? rawText.trim().split(/\s+/).filter(Boolean).length : 0;
+
+  useEffect(() => {
+    sessionStorage.setItem(DRAFT_TEXT_KEY, rawText);
+  }, [rawText]);
+
+  // Keep Edge Function warm
+  useEffect(() => {
+    fetch(CHECKOUT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'x-ping': 'keep-alive' },
+    }).catch(() => {});
+  }, []);
+
+  // Poll on return from Stripe Checkout (?session=...&cs=...)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const session = params.get('session');
-    const cs = params.get('cs');
-    if (session) {
-      setSessionUuid(session);
+    const sessionParam = params.get('session') || params.get('session_id');
+    const csParam = params.get('cs');
+
+    if (!sessionParam && !csParam) return;
+
+    if (csParam && csParam.startsWith('cs_')) {
+      localStorage.setItem(STORAGE_CS_KEY, csParam);
     }
-    if (cs) {
-      setStripeSessionId(cs);
-      try {
-        localStorage.setItem(STORAGE_CS_KEY, cs);
-      } catch {
-        // Ignore storage errors in restricted private browsing modes
+
+    setVerifying(true);
+    setError(null);
+
+    let attempts = 0;
+    let cancelled = false;
+
+    const pollStatus = async () => {
+      while (!cancelled && attempts < 15) {
+        attempts += 1;
+        try {
+          const resp = await fetch(CHECKOUT_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'verify',
+              session_uuid: sessionParam || csParam,
+              stripe_session_id: csParam || localStorage.getItem(STORAGE_CS_KEY),
+            }),
+          });
+
+          const data = await resp.json();
+          if (data?.status === 'unlocked' && data?.decode_result) {
+            setDecodeResult(data.decode_result);
+            if (data.stripe_session_id) {
+              localStorage.setItem(STORAGE_CS_KEY, data.stripe_session_id);
+            }
+            if (typeof data.credits_remaining === 'number') {
+              localStorage.setItem(STORAGE_CREDITS_KEY, String(data.credits_remaining));
+              setCreditsLeft(data.credits_remaining);
+            }
+            sessionStorage.removeItem(DRAFT_TEXT_KEY);
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setVerifying(false);
+            return;
+          }
+        } catch (err) {
+          console.error('Verification poll error:', err);
+        }
+        await new Promise((r) => setTimeout(r, 1500));
       }
-    }
+
+      if (!cancelled) {
+        setVerifying(false);
+        setError('Payment verification timed out. Tap the button again to unlock your decode.');
+      }
+    };
+
+    pollStatus();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleReset = useCallback(() => {
-    setPreloadedResult(null);
-    setSessionUuid(null);
-    try {
-      sessionStorage.removeItem(STORAGE_DRAFT_KEY);
-    } catch {
-      // Ignore storage errors
-    }
-    window.history.replaceState({}, '', window.location.origin);
-  }, []);
-
-  const handleInstantUnlock = useCallback(
-    (result: DecodeResult, jobId: string, csId: string, creditsLeft: number) => {
-      try {
-        if (csId) localStorage.setItem(STORAGE_CS_KEY, csId);
-        localStorage.setItem(STORAGE_CREDITS_KEY, String(Math.max(0, creditsLeft)));
-        sessionStorage.removeItem(STORAGE_DRAFT_KEY);
-      } catch {
-        // Ignore storage errors
-      }
-      setPreloadedResult(result);
-      setSessionUuid(jobId);
-    },
-    []
-  );
-
-  return (
-    <div className="min-h-screen bg-[#08090C] text-gray-100 font-sans selection:bg-[#22C55E] selection:text-black">
-      {sessionUuid || preloadedResult ? (
-        <RevealPage
-          sessionUuid={sessionUuid}
-          stripeSessionId={stripeSessionId}
-          preloadedResult={preloadedResult}
-          onReset={handleReset}
-        />
-      ) : (
-        <LandingPage onInstantUnlock={handleInstantUnlock} />
-      )}
-    </div>
-  );
-}
-
-function LandingPage({
-  onInstantUnlock,
-}: {
-  onInstantUnlock: (result: DecodeResult, jobId: string, csId: string, creditsLeft: number) => void;
-}) {
-  const [inputText, setInputText] = useState<string>(() => {
-    try {
-      return sessionStorage.getItem(STORAGE_DRAFT_KEY) || '';
-    } catch {
-      return '';
-    }
-  });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
-  const [savedCs, setSavedCs] = useState<string | null>(null);
-  const [creditsLeft, setCreditsLeft] = useState<number>(0);
-
-  useEffect(() => {
-    try {
-      const cs = localStorage.getItem(STORAGE_CS_KEY);
-      const savedCreds = parseInt(localStorage.getItem(STORAGE_CREDITS_KEY) || '0', 10);
-      if (cs) setSavedCs(cs);
-      if (!Number.isNaN(savedCreds) && savedCreds > 0) {
-        setCreditsLeft(savedCreds);
-      }
-    } catch {
-      // Ignore storage errors
-    }
-  }, []);
-
-  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setInputText(val);
-    if (error) setError('');
-    try {
-      sessionStorage.setItem(STORAGE_DRAFT_KEY, val);
-    } catch {
-      // Ignore storage errors
-    }
-  };
-
-  const trimmedText = inputText.trim();
-  const wordCount = trimmedText ? trimmedText.split(/\s+/).filter(Boolean).length : 0;
-
-  const handleCheckout = async () => {
-    if (!trimmedText) {
-      setError('Please paste a message first.');
+  const handleDecode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = rawText.trim();
+    if (!trimmed) {
+      setError('Paste a message or thread first.');
       return;
     }
 
-    setIsLoading(true);
-    setError('');
+    setLoading(true);
+    setError(null);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const savedCsId = localStorage.getItem(STORAGE_CS_KEY);
 
     try {
-      const response = await fetch(CHECKOUT_ENDPOINT, {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const resp = await fetch(CHECKOUT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          raw_text: trimmedText,
-          stripe_session_id: savedCs,
+          raw_text: trimmed,
+          stripe_session_id: creditsLeft > 0 ? savedCsId : null,
           return_origin: window.location.origin,
         }),
       });
 
       clearTimeout(timeoutId);
+      const data = await resp.json();
 
-      const data: EdgeFunctionResponse = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data.error || `Gateway Error (${response.status}). Please try again.`);
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || 'Could not connect to checkout server.');
       }
 
       if (data.instant_unlock && data.decode_result) {
+        setDecodeResult(data.decode_result);
         const remaining =
           typeof data.credits_remaining === 'number'
             ? data.credits_remaining
             : Math.max(0, creditsLeft - 1);
-
-        onInstantUnlock(
-          data.decode_result,
-          data.session_id || 'instant',
-          data.stripe_session_id || savedCs || '',
-          remaining
-        );
+        localStorage.setItem(STORAGE_CREDITS_KEY, String(remaining));
+        setCreditsLeft(remaining);
+        sessionStorage.removeItem(DRAFT_TEXT_KEY);
+        setLoading(false);
         return;
       }
 
-      const targetUrl = data.checkout_url || data.url;
-      if (targetUrl) {
-        window.location.assign(targetUrl);
-      } else {
-        throw new Error(data.error || 'No checkout URL returned.');
+      const redirectUrl = data.checkout_url || data.url;
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return;
       }
-    } catch (err: unknown) {
-      clearTimeout(timeoutId);
-      const message =
-        err instanceof DOMException && err.name === 'AbortError'
-          ? 'Request timed out. Please tap again.'
-          : err instanceof Error
-          ? err.message
-          : 'Connection unstable. Please try again.';
-      setError(message);
-      setIsLoading(false);
+
+      throw new Error('No checkout URL returned.');
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        localStorage.removeItem(STORAGE_CS_KEY);
+        localStorage.removeItem(STORAGE_CREDITS_KEY);
+        setCreditsLeft(0);
+        setError('Request timed out. Tap again to open a fresh 99p checkout.');
+      } else {
+        setError(err.message || 'Something went wrong. Please try again.');
+      }
+      setLoading(false);
     }
+  };
+
+  const handleCopyTakeaway = () => {
+    if (!decodeResult) return;
+    navigator.clipboard.writeText(decodeResult.executive_takeaway);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleReset = () => {
+    setDecodeResult(null);
+    setRawText('');
+    setError(null);
   };
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen p-6 max-w-[420px] mx-auto relative overflow-hidden">
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[300px] h-[300px] bg-[#22C55E]/10 rounded-full blur-[100px] pointer-events-none" />
-      <div className="w-full space-y-6 relative z-10">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-gray-300">
-              <Fingerprint className="w-3.5 h-3.5 text-[#22C55E]" />
-              <span>Anonymous & Encrypted</span>
-            </div>
-            {creditsLeft > 0 && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#22C55E]/15 border border-[#22C55E]/30 text-xs font-mono text-[#22C55E]">
-                <Sparkles className="w-3 h-3" />
-                <span>{creditsLeft}/5 Decodes Left</span>
-              </div>
-            )}
-          </div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-white leading-tight">
-            Stop overthinking <br /> their texts.
-          </h1>
-          <p className="text-gray-400 text-base">
-            Paste their message or full thread. Get the true subtext, red/green flags, and exact reply scripts.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <textarea
-            value={inputText}
-            onChange={handleTextChange}
-            disabled={isLoading}
-            aria-label="Paste message or conversation thread to decode"
-            placeholder="Paste their confusing message or conversation thread here..."
-            className="w-full h-44 p-5 bg-white/5 backdrop-blur-md border border-white/10 rounded-3xl focus:border-[#22C55E]/50 focus:ring-1 focus:ring-[#22C55E]/50 outline-none resize-none transition-all text-gray-100 placeholder-gray-600 shadow-xl disabled:opacity-50"
-          />
-          <div className="flex justify-between items-center px-2 text-xs text-gray-500">
-            <span>
-              {wordCount} {wordCount === 1 ? 'word' : 'words'}
+    <div className="min-h-screen bg-[#08090C] text-[#F3F4F6] flex flex-col items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#111827] border border-[#1F2937] text-xs text-emerald-400 font-medium mb-4">
+          <span>🛡️ Anonymous &amp; Encrypted</span>
+          {creditsLeft > 0 && (
+            <span className="ml-1 pl-2 border-l border-[#1F2937] text-emerald-300 font-semibold">
+              {creditsLeft}/5 Credits Left
             </span>
-            <span>
-              {wordCount === 0
-                ? 'Tip: Paste the full exchange for deeper accuracy'
-                : wordCount <= 3
-                ? 'Short input: Quick literal subtext read'
-                : 'Deep forensic analysis + reply scripts unlocked'}
-            </span>
-          </div>
-        </div>
-
-        {error && (
-          <p role="alert" className="text-red-400 text-sm font-medium pl-2">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={handleCheckout}
-          disabled={isLoading}
-          className="w-full flex items-center justify-center space-x-2 bg-[#22C55E] hover:bg-[#1ea951] active:scale-[0.98] text-black font-bold py-4 rounded-2xl transition-all disabled:opacity-70 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(34,197,94,0.2)] hover:shadow-[0_0_30px_rgba(34,197,94,0.4)]"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="animate-spin w-5 h-5" />
-              <span>Decoding subtext...</span>
-            </>
-          ) : creditsLeft > 0 ? (
-            <>
-              <span className="text-lg">Decode Message ({creditsLeft}/5 Credits Left)</span>
-              <ArrowRight className="w-5 h-5" />
-            </>
-          ) : (
-            <>
-              <span className="text-lg">Unlock 5 Decodes (£2.99)</span>
-              <ArrowRight className="w-5 h-5" />
-            </>
           )}
-        </button>
-      </div>
-    </main>
-  );
-}
-
-function RevealPage({
-  sessionUuid,
-  stripeSessionId,
-  preloadedResult,
-  onReset,
-}: {
-  sessionUuid: string | null;
-  stripeSessionId: string | null;
-  preloadedResult?: DecodeResult | null;
-  onReset: () => void;
-}) {
-  const [result, setResult] = useState<DecodeResult | null>(preloadedResult || null);
-  const [isPolling, setIsPolling] = useState<boolean>(!preloadedResult);
-  const [pollTimedOut, setPollTimedOut] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
-  const [creditsRemaining, setCreditsRemaining] = useState<number | null>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_CREDITS_KEY);
-      return saved !== null ? parseInt(saved, 10) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const verifySession = useCallback(
-    async (signal?: AbortSignal): Promise<boolean> => {
-      try {
-        const storedCs = (() => {
-          try {
-            return localStorage.getItem(STORAGE_CS_KEY);
-          } catch {
-            return null;
-          }
-        })();
-
-        const verifyRes = await fetch(CHECKOUT_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal,
-          body: JSON.stringify({
-            action: 'verify',
-            session_uuid: sessionUuid,
-            stripe_session_id: stripeSessionId || storedCs,
-          }),
-        });
-
-        if (!verifyRes.ok) return false;
-
-        const verifyData: EdgeFunctionResponse = await verifyRes.json();
-
-        if ((verifyData?.status === 'unlocked' || verifyData?.instant_unlock) && verifyData?.decode_result) {
-          setResult(verifyData.decode_result);
-          try {
-            if (verifyData.stripe_session_id) {
-              localStorage.setItem(STORAGE_CS_KEY, verifyData.stripe_session_id);
-            }
-            if (typeof verifyData.credits_remaining === 'number') {
-              setCreditsRemaining(verifyData.credits_remaining);
-              localStorage.setItem(STORAGE_CREDITS_KEY, String(verifyData.credits_remaining));
-            }
-            sessionStorage.removeItem(STORAGE_DRAFT_KEY);
-          } catch {
-            // Ignore storage errors
-          }
-          setIsPolling(false);
-          setPollTimedOut(false);
-          return true;
-        }
-      } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === 'AbortError') return false;
-        console.error('Verification poll error:', err);
-      }
-      return false;
-    },
-    [sessionUuid, stripeSessionId]
-  );
-
-  useEffect(() => {
-    if (preloadedResult) {
-      setResult(preloadedResult);
-      setIsPolling(false);
-      return;
-    }
-
-    if (!isPolling) return;
-
-    const controller = new AbortController();
-    let attempts = 0;
-    const maxAttempts = 16; // ~40 seconds total polling window
-
-    const runPoll = async () => {
-      attempts += 1;
-      const unlocked = await verifySession(controller.signal);
-      if (!unlocked && attempts >= maxAttempts && !controller.signal.aborted) {
-        setPollTimedOut(true);
-        setIsPolling(false);
-      }
-    };
-
-    runPoll();
-    const pollInterval = setInterval(runPoll, 2500);
-
-    return () => {
-      controller.abort();
-      clearInterval(pollInterval);
-    };
-  }, [isPolling, preloadedResult, verifySession]);
-
-  const handleCopyTakeaway = async () => {
-    if (!result?.executive_takeaway) return;
-    try {
-      await navigator.clipboard.writeText(result.executive_takeaway);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Ignore clipboard permission errors
-    }
-  };
-
-  if (isPolling || !result) {
-    return (
-      <main className="flex flex-col items-center justify-center min-h-screen p-6 text-center max-w-[420px] mx-auto">
-        <div className="relative">
-          <div className="absolute inset-0 bg-[#22C55E] blur-[30px] opacity-20 rounded-full" />
-          <Loader2 className="w-12 h-12 text-[#22C55E] animate-spin mb-6 relative z-10 mx-auto" />
         </div>
-        <p className="text-sm font-mono text-[#22C55E] tracking-widest uppercase animate-pulse">
-          Decrypting Subtext Matrix
-        </p>
-        {pollTimedOut && (
-          <div className="mt-6 space-y-3">
-            <p className="text-xs text-gray-400">
-              Finalizing confirmation with Stripe. Tap below to refresh your decode immediately.
+
+        {!decodeResult ? (
+          <>
+            <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2 leading-tight">
+              Stop overthinking their texts.
+            </h1>
+            <p className="text-sm text-gray-400 mb-6">
+              Paste their message or full thread. Get the true subtext, red/green flags, and exact reply scripts.
             </p>
+
+            {verifying ? (
+              <div className="p-6 rounded-2xl bg-[#0F1117] border border-emerald-500/30 text-center space-y-3">
+                <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-sm font-semibold text-emerald-400">
+                  Payment confirmed — running forensic subtext decode...
+                </p>
+              </div>
+            ) : (
+              <form onSubmit={handleDecode} className="space-y-3">
+                <textarea
+                  value={rawText}
+                  onChange={(e) => setRawText(e.target.value)}
+                  placeholder="Paste their exact text message or thread here..."
+                  rows={5}
+                  className="w-full rounded-2xl bg-[#0F1117] border border-[#1F2937] focus:border-emerald-500 focus:outline-none p-4 text-sm text-gray-100 placeholder-gray-500 resize-none"
+                />
+
+                <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+                  <span>{wordCount} {wordCount === 1 ? 'word' : 'words'}</span>
+                  <span>
+                    {wordCount === 0
+                      ? 'Awaiting message input'
+                      : wordCount <= 3
+                      ? 'Short input: Quick literal subtext read'
+                      : 'Deep forensic analysis + reply scripts unlocked'}
+                  </span>
+                </div>
+
+                {error && (
+                  <div className="p-3 rounded-xl bg-red-950/50 border border-red-500/40 text-xs text-red-300">
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3.5 px-5 rounded-xl bg-[#22C55E] hover:bg-[#16A34A] disabled:opacity-60 text-black font-bold text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10"
+                >
+                  {loading ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                      <span>Decoding subtext...</span>
+                    </>
+                  ) : creditsLeft > 0 ? (
+                    <span>Decode Message ({creditsLeft}/5 Credits Left) →</span>
+                  ) : (
+                    <span>Unlock 5 Decodes (99p) →</span>
+                  )}
+                </button>
+              </form>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono uppercase tracking-wider text-emerald-400 font-semibold">
+                ● VIBE DECODED
+              </span>
+              <span className="text-xs text-gray-400 font-mono">
+                {creditsLeft}/5 Credits Left
+              </span>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-[#0F1117] border border-[#1F2937] space-y-4">
+              <div>
+                <h2 className="text-lg font-bold text-white leading-snug">
+                  {decodeResult.headline}
+                </h2>
+                <p className="text-sm text-gray-300 mt-2 leading-relaxed">
+                  {decodeResult.true_intent}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 pt-2 border-t border-[#1F2937]">
+                <div className="p-3 rounded-xl bg-red-950/20 border border-red-500/20">
+                  <div className="text-xs font-bold text-red-400 uppercase tracking-wider mb-1.5">
+                    🚩 Red Flags
+                  </div>
+                  <ul className="space-y-1 text-xs text-gray-300 list-disc list-inside">
+                    {decodeResult.red_flags.map((flag, idx) => (
+                      <li key={idx}>{flag}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/20">
+                  <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1.5">
+                    ✅ Green Flags
+                  </div>
+                  <ul className="space-y-1 text-xs text-gray-300 list-disc list-inside">
+                    {decodeResult.green_flags.map((flag, idx) => (
+                      <li key={idx}>{flag}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#111827] border border-emerald-500/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    💬 Reply Playbook &amp; Takeaway
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyTakeaway}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 font-medium"
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-200 leading-relaxed">
+                  {decodeResult.executive_takeaway}
+                </p>
+              </div>
+            </div>
+
             <button
               type="button"
-              onClick={() => {
-                setPollTimedOut(false);
-                setIsPolling(true);
-              }}
-              className="px-5 py-2.5 rounded-xl bg-[#22C55E] text-black font-semibold text-xs hover:bg-[#1ea951] transition-all"
+              onClick={handleReset}
+              className="w-full py-3 px-4 rounded-xl bg-[#111827] hover:bg-[#1F2937] text-white font-semibold text-sm border border-[#1F2937] transition"
             >
-              Retry Verification
+              Decode Another Message {creditsLeft > 0 ? `(${creditsLeft} Left)` : '(99p for 5)'}
             </button>
           </div>
         )}
-      </main>
-    );
-  }
-
-  return (
-    <main className="min-h-screen p-6 max-w-[420px] mx-auto py-10 space-y-6 animate-in fade-in duration-700">
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="inline-block px-3 py-1 bg-[#22C55E]/10 border border-[#22C55E]/20 rounded-full text-xs font-mono text-[#22C55E]">
-            ● VIBE DECODED
-          </div>
-          {creditsRemaining !== null && (
-            <div className="inline-block px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs font-mono text-gray-300">
-              {creditsRemaining}/5 Credits Left
-            </div>
-          )}
-        </div>
-        <h1 className="text-2xl font-bold text-white leading-snug">{result.headline}</h1>
       </div>
-
-      <div className="p-5 rounded-2xl bg-white/5 border border-white/10 space-y-2">
-        <h2 className="text-xs font-mono uppercase tracking-wider text-gray-400">True Subtext & Intent</h2>
-        <p className="text-gray-200 text-sm leading-relaxed whitespace-pre-line">{result.true_intent}</p>
-      </div>
-
-      {Array.isArray(result.red_flags) && result.red_flags.length > 0 && (
-        <div className="p-5 rounded-2xl bg-red-500/5 border border-red-500/20 space-y-3">
-          <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-red-400">
-            <ShieldAlert className="w-4 h-4 shrink-0" />
-            <span>Red Flags & Caution Signals</span>
-          </div>
-          <ul className="space-y-2 text-sm text-gray-300 list-disc pl-4">
-            {result.red_flags.map((flag: string, i: number) => (
-              <li key={i} className="leading-relaxed">
-                {flag}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {Array.isArray(result.green_flags) && result.green_flags.length > 0 && (
-        <div className="p-5 rounded-2xl bg-[#22C55E]/5 border border-[#22C55E]/20 space-y-3">
-          <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-wider text-[#22C55E]">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>Green Flags & Baseline Signals</span>
-          </div>
-          <ul className="space-y-2 text-sm text-gray-300 list-disc pl-4">
-            {result.green_flags.map((flag: string, i: number) => (
-              <li key={i} className="leading-relaxed">
-                {flag}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="p-5 rounded-2xl bg-white/5 border border-[#22C55E]/30 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xs font-mono uppercase tracking-wider text-[#22C55E]">
-            Executive Takeaway & Reply Playbook
-          </h2>
-          <button
-            type="button"
-            onClick={handleCopyTakeaway}
-            className="inline-flex items-center gap-1 text-xs font-mono text-gray-400 hover:text-[#22C55E] transition-colors"
-          >
-            {copied ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-[#22C55E]" />
-                <span className="text-[#22C55E]">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
-        </div>
-        <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-line">{result.executive_takeaway}</p>
-      </div>
-
-      <button
-        type="button"
-        onClick={onReset}
-        className="w-full flex items-center justify-center space-x-2 bg-[#22C55E] hover:bg-[#1ea951] active:scale-[0.98] text-black font-bold py-4 rounded-2xl transition-all"
-      >
-        <RefreshCcw className="w-4 h-4" />
-        <span>
-          {creditsRemaining && creditsRemaining > 0
-            ? `Decode Next Message (${creditsRemaining}/5 Left)`
-            : 'Decode Another Message'}
-        </span>
-      </button>
-    </main>
+    </div>
   );
 }
