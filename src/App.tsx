@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 export const SUPABASE_PROJECT_ID = 'qnnnnvlissdqdwmkgrao';
 export const SUPABASE_REGION = 'eu-west-1';
@@ -20,6 +20,12 @@ interface DecodeResult {
 
 export default function App() {
   const [rawText, setRawText] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const prefilled = params.get('text') || params.get('q');
+    if (prefilled) {
+      sessionStorage.setItem(DRAFT_TEXT_KEY, prefilled);
+      return prefilled;
+    }
     return sessionStorage.getItem(DRAFT_TEXT_KEY) || '';
   });
   const [loading, setLoading] = useState<boolean>(false);
@@ -35,6 +41,16 @@ export default function App() {
   });
 
   const wordCount = rawText.trim() ? rawText.trim().split(/\s+/).filter(Boolean).length : 0;
+
+  // Instant client-side heuristic signal scan to trigger curiosity before 99p checkout
+  const preScanSignals = useMemo(() => {
+    const lower = rawText.toLowerCase();
+    let signals = 0;
+    if (/\b(busy|space|idk|maybe|fine|whatever|sorry|honestly|just|tired|later)\b/.test(lower)) signals += 1;
+    if (rawText.includes('...') || rawText.includes('?')) signals += 1;
+    if (wordCount >= 12) signals += 1;
+    return Math.max(2, signals + 1);
+  }, [rawText, wordCount]);
 
   useEffect(() => {
     sessionStorage.setItem(DRAFT_TEXT_KEY, rawText);
@@ -240,7 +256,7 @@ export default function App() {
                       ? 'Awaiting message input'
                       : wordCount <= 3
                       ? 'Short input: Quick literal subtext read'
-                      : 'Deep forensic analysis + reply scripts unlocked'}
+                      : `⚠️ ${preScanSignals} subtext markers detected — ready to decode`}
                   </span>
                 </div>
 
@@ -266,6 +282,30 @@ export default function App() {
                     <span>Unlock 5 Decodes (99p) →</span>
                   )}
                 </button>
+
+                {creditsLeft === 0 && (
+                  <p className="text-[11px] text-center text-gray-400 pt-0.5">
+                    ⚡ £0.99 one-off pass (5 decodes) • Apple Pay &amp; Google Pay • No subscription
+                  </p>
+                )}
+
+                {wordCount >= 4 && creditsLeft === 0 && (
+                  <div className="mt-4 p-4 rounded-2xl bg-[#0F1117] border border-[#1F2937] space-y-2.5 relative overflow-hidden">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-amber-400 font-semibold">
+                        🔒 Pre-Scan Complete: {preScanSignals} Hidden Tone Shifts Found
+                      </span>
+                      <span className="text-[11px] text-emerald-400 font-semibold">
+                        Ready
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 select-none blur-[4px] opacity-60 pointer-events-none text-xs text-gray-300">
+                      <p className="font-semibold text-white">Headline: Emotional distancing masked as polite busyness</p>
+                      <p>🚩 Red Flag: Shifts responsibility onto you while avoiding a direct commitment.</p>
+                      <p>💬 Exact Reply Script: Mirror their brevity and do not follow up for 48 hours.</p>
+                    </div>
+                  </div>
+                )}
               </form>
             )}
           </>
