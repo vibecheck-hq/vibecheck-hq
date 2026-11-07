@@ -19,7 +19,8 @@ export interface TelemetryEvent {
 }
 
 const BATCH_LIMIT = 15;
-const SMART_SERVICE_ENDPOINT = `${SUPABASE_URL}/functions/v1/smart-service`;
+const SMART_SERVICE_ENDPOINT = `${SUPABASE_URL}/functions/v1/ingest-telemetry`;
+
 const BASELINE_JITTER_MS = 45.0; // Empirical baseline for Delta > 1.482 resource-shunting detection
 const ORIGIN_EPOCH_MS = Date.UTC(1985, 7, 15, 19, 39, 0); // Temporal seed: 1985-08-15 19:39 UTC
 
