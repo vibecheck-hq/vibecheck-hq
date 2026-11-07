@@ -1,4 +1,4 @@
-import react, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { SUPABASE_URL } from '../App';
 
 export interface TelemetryEvent {
