@@ -48,9 +48,9 @@ export default function App() {
               placeholder="e.g. 'Maybe we can catch up sometime, I'm pretty busy this week.'"
               className="w-full resize-none rounded-2xl border border-white/10 bg-[#0E1015] px-4 py-3 text-base text-[#F3F4F6] placeholder:text-[#4B5563] outline-none transition-colors duration-200 focus:border-[#00F5D4]/60 focus:ring-2 focus:ring-[#00F5D4]/20"
             />
-            <VibeCheckCheckoutButton text={text} price="£2.99" />
+            <VibeCheckCheckoutButton text={text} price="99p" />
             <p className="text-center text-xs text-[#6B7280]">
-              One-time £2.99 payment for 5 decodes. No subscription.
+              One-time 99p payment for 50 decodes. No subscription.
             </p>
           </div>
         )}

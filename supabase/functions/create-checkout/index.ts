@@ -7,7 +7,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-const PASS_CREDIT_LIMIT = 5;
+const PASS_CREDIT_LIMIT = 50;
+const PASS_PRICE_PENCE = 99;
 
 interface DecodeResult {
   headline: string;
@@ -338,7 +339,7 @@ Deno.serve(async (req) => {
       throw new Error("Please paste a message to decode.");
     }
 
-    // Check if user has an active, paid 5-Decode Pass with remaining credits
+    // Check if user has an active, paid 50-Decode Pass with remaining credits
     if (existingCsId && existingCsId.startsWith("cs_")) {
       try {
         const existingSession = await stripe.checkout.sessions.retrieve(existingCsId);
@@ -377,7 +378,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 3. CREATE FRESH STRIPE CHECKOUT SESSION (£2.99 GBP FOR 5 DECODES)
+    // 3. CREATE FRESH STRIPE CHECKOUT SESSION (99p GBP FOR 50 DECODES)
     let jobId: string | null = null;
 
     try {
@@ -397,27 +398,24 @@ Deno.serve(async (req) => {
       console.error("Non-fatal DB insert warning:", dbEx);
     }
 
-    const configuredPriceId = Deno.env.get("STRIPE_PRICE_ID");
-    const lineItem = configuredPriceId
-      ? { price: configuredPriceId, quantity: 1 }
-      : {
-          price_data: {
-            currency: "gbp",
-            product_data: {
-              name: "VibeCheck — 5-Message Subtext Decode Pass",
-              description: "Instant True Intent, Red/Green Flags & Reply Playbook (5 Decodes)",
-            },
-            unit_amount: 299,
-          },
-          quantity: 1,
-        };
+    const lineItem = {
+      price_data: {
+        currency: "gbp",
+        product_data: {
+          name: "VibeCheck — 50-Decode Pass",
+          description: "Instant True Intent, Red/Green Flags & Reply Playbook (50 Decodes)",
+        },
+        unit_amount: PASS_PRICE_PENCE,
+      },
+      quantity: 1,
+    };
 
     const successUrl = jobId
       ? `${returnOrigin}/?session=${jobId}&cs={CHECKOUT_SESSION_ID}`
       : `${returnOrigin}/?session={CHECKOUT_SESSION_ID}&cs={CHECKOUT_SESSION_ID}`;
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "link"],
       mode: "payment",
       billing_address_collection: "auto",
       line_items: [lineItem],

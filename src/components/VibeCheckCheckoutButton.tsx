@@ -37,7 +37,7 @@ export function VibeCheckCheckoutButton({ text, price }: VibeCheckCheckoutButton
         ) : (
           <Lock className="h-5 w-5 transition-transform duration-200 group-hover:scale-110" aria-hidden="true" />
         )}
-        <span>{isLoading ? 'Opening secure checkout...' : `Unlock full decode for ${price}`}</span>
+        <span>{isLoading ? 'Opening secure checkout...' : `Unlock 50 decodes for ${price}`}</span>
       </button>
 
       {errorMessage && (

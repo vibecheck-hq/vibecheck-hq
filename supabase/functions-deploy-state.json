@@ -1,0 +1,13 @@
+{
+  "projectId": "71199801",
+  "functions": {
+    "create-checkout": {
+      "hasChanged": false,
+      "hash": "d3857b7d50e64e855a3947561be3ad1e9d8144a127f3749878ce6430289d5a61"
+    },
+    "stripe-webhook": {
+      "hasChanged": false,
+      "hash": "e21161f217d730e035a91ebf47aabda86ea63cc46882e9b5c258913d5d27d3dd"
+    }
+  }
+}
